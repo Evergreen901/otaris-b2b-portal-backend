@@ -1,0 +1,105 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+##
+# This AWS CLoudformation template creates an ECR registry to deploy docker images
+# and an App Runner to run those images.
+# it additionally creates a MongoDB database and configures it on backend.
+# 
+# Stack Names:
+# otaris-b2b-be-dev-1-repo
+# otaris-b2b-be-prod-1-repo
+##
+
+Parameters:
+  AppName:
+    Type: String
+    Default: otaris-b2b-be-dev
+
+Resources:
+  # Policy to allow bitbucket user to push images to container
+  ECRAllowPushImagesPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${AppName}-ECRAllowPushImages"
+      Users:
+        - !Ref BitbucketDeployer
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+            - ecr:GetAuthorizationToken
+          Resource:
+            - '*'
+        - Effect: Allow
+          Action:
+            - ecr:InitiateLayerUpload
+            - ecr:UploadLayerPart
+            - ecr:CompleteLayerUpload
+            - ecr:PutImage
+            - ecr:BatchCheckLayerAvailability
+            - ecr:GetDownloadUrlForLayer
+            - ecr:GetRepositoryPolicy
+            - ecr:DescribeRepositories
+            - ecr:ListImages
+            - ecr:DescribeImages
+            - ecr:BatchGetImage
+          Resource:
+            - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${AppName}
+
+  # Hold docker images for app runner
+  BackendRepo:
+    Type: AWS::ECR::Repository
+    Properties: 
+      RepositoryName: !Ref AppName
+      EncryptionConfiguration: 
+        EncryptionType: AES256
+      ImageScanningConfiguration: 
+        ScanOnPush: False
+      ImageTagMutability: MUTABLE
+
+  # Allows App Runner access to ECR
+  AppRunnerECRAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - build.apprunner.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+      RoleName: !Sub ${AppName}-AppRunnerECRAccessRole-CF
+
+  # Creates bitbucket user with permission to push docker images to ECR
+  BitbucketDeployer:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Ref AppName
+
+  # Creates an API KEY for this user
+  BitbucketDeployerApiKey:
+    Type: AWS::IAM::AccessKey
+    Properties: 
+      Serial: 1 # NOTE: to rotate the secret key, increment this number
+      Status: Active
+      UserName: !Ref BitbucketDeployer
+
+# Outputs all the information necessary to configure in other services
+Outputs:
+  BitbucketDeployerArn:
+    Description: ARN of the user created for bitbucket
+    Value: !GetAtt BitbucketDeployer.Arn
+  BitbucketDeployerAccessKey:
+    Description: Access key of the bitbucket user 
+    Value: !Ref BitbucketDeployerApiKey
+  BitbucketDeployerSecretKey:
+    Description: Secret key of the bitbucket user 
+    Value: !GetAtt BitbucketDeployerApiKey.SecretAccessKey
+  BackendRepoUri:
+    Description: URI for the backend repository
+    Value: !GetAtt BackendRepo.RepositoryUri

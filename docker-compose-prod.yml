@@ -1,0 +1,17 @@
+version: '3.7'
+
+services:
+  otaris-b2b-be:
+    image: 946497301585.dkr.ecr.us-east-2.amazonaws.com/otaris-b2b-be-prod
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    volumes:
+      - ./src:/home/node/app/src
+    container_name: otaris-b2b-be
+    expose:
+      - '5050'
+    ports:
+      - '5050:5050'
+    command: node build/index.js

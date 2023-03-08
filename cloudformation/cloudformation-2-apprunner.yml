@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+##
+# This AWS CLoudformation template creates an ECR registry to deploy docker images
+# and an App Runner to run those images.
+# it additionally creates a MongoDB database and configures it on backend.
+##
+
+Parameters:
+  AppName:
+    Type: String
+    Default: otaris-b2b-be-dev
+  ECRRepoURI:
+    Type: String
+    Default: 946497301585.dkr.ecr.us-east-2.amazonaws.com/otaris-b2b-be-dev:latest
+  CPUs:
+    Type: Number
+    Description: Please Enter the required CPU Size
+    Default: 1
+    AllowedValues: [1, 2]
+  Memory:
+    Type: Number
+    Description: Please choose the memory
+    Default: 2
+    AllowedValues: [2, 3, 4]
+  TypeformEmail:
+    Type: String
+    Default: "43c16664-899d-447d-8d53-fa832c1fc3a3"
+  TypeformProject:
+    Type: String
+    Default: "c4312200-a943-44fe-939a-7a4603d62466"
+  TypeformName:
+    Type: String
+    Default: "0674ff32-53ff-4e92-a007-d5a79efffa6b"
+  MongoDBURI:
+    Type: String
+    Default: "mongodb+srv://gmussi:pBP9XWaDboRUn9i4@cluster0-otaris.e08wke9.mongodb.net/?retryWrites=true&w=majority"
+
+Resources:
+  # Allows App Runner access to ECR
+  AppRunnerECRAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - build.apprunner.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+      RoleName: !Sub ${AWS::StackName}-AppRunnerECRAccessRole-CF
+
+  AppRunner:
+    #DependsOn: AppRunnerApplicationAccessRole
+    Type: AWS::AppRunner::Service
+    Properties:
+      ServiceName: !Ref AppName
+      InstanceConfiguration:
+        Cpu: !Sub ${CPUs} vCPU
+        Memory: !Sub ${Memory} GB
+        #InstanceRoleArn: !GetAtt AppRunnerApplicationAccessRole.Arn
+      HealthCheckConfiguration:
+        HealthyThreshold: 3
+        Interval: 5
+        Path: /
+        Protocol: HTTP
+        Timeout: 20
+        UnhealthyThreshold: 3
+      SourceConfiguration:
+        AuthenticationConfiguration:
+          AccessRoleArn: !GetAtt AppRunnerECRAccessRole.Arn
+        AutoDeploymentsEnabled: true
+        ImageRepository:
+          ImageConfiguration:
+            Port: 5050
+            StartCommand: node build/index.js
+            RuntimeEnvironmentVariables:
+              - Name: TYPEFORM_EMAIL
+                Value: !Ref TypeformEmail
+              - Name: TYPEFORM_PROJECT
+                Value: !Ref TypeformProject
+              - Name: TYPEFORM_NAME
+                Value: !Ref TypeformName
+              - Name: MONGODB_URI
+                Value: !Ref MongoDBURI
+              - Name: PORT
+                Value: 5050
+          ImageIdentifier: !Ref ECRRepoURI
+          ImageRepositoryType: ECR
+
+  # Creates bitbucket user with permission to push docker images to ECR
+  BitbucketDeployer:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: artis-bitbucket
+
+  # Creates an API KEY for this user
+  BitbucketDeployerApiKey:
+    Type: AWS::IAM::AccessKey
+    Properties: 
+      Serial: 1 # NOTE: to rotate the secret key, increment this number
+      Status: Active
+      UserName: !Ref BitbucketDeployer
+
